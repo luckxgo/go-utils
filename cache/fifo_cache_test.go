@@ -6,7 +6,7 @@ import (
 
 // TestFIFOCache_Basic 测试基本的Set和Get操作
 func TestFIFOCache_Basic(t *testing.T) {
-	fifo, err := NewFIFOCache[int, string](2)
+	fifo, err := NewFIFOCache[int, string](2, WithConcurrentSafe(false))
 	if err != nil {
 		t.Fatalf("创建FIFO缓存失败: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestFIFOCache_Basic(t *testing.T) {
 
 // TestFIFOCache_Eviction 测试缓存淘汰机制
 func TestFIFOCache_Eviction(t *testing.T) {
-	fifo, err := NewFIFOCache[int, string](2)
+	fifo, err := NewFIFOCache[int, string](2, WithConcurrentSafe(false))
 	if err != nil {
 		t.Fatalf("创建FIFO缓存失败: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestFIFOCache_Eviction(t *testing.T) {
 
 // TestFIFOCache_Delete 测试删除操作
 func TestFIFOCache_Delete(t *testing.T) {
-	fifo, err := NewFIFOCache[int, string](2)
+	fifo, err := NewFIFOCache[int, string](2, WithConcurrentSafe(false))
 	if err != nil {
 		t.Fatalf("创建FIFO缓存失败: %v", err)
 	}
@@ -142,4 +142,41 @@ func BenchmarkFIFOCache_Eviction(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		fifo.Set(i, i)
 	}
+}
+
+// BenchmarkFIFOCache_SetGet_NoLock 基准测试禁用并发安全的Set和Get操作性能
+func BenchmarkFIFOCache_SetGet_NoLock(b *testing.B) {
+	fifo, _ := NewFIFOCache[int, int](1000, WithConcurrentSafe(false))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		key := i % 1000
+		fifo.Set(key, i)
+		fifo.Get(key)
+	}
+}
+
+// BenchmarkFIFOCache_Eviction_NoLock 基准测试禁用并发安全的缓存淘汰性能
+func BenchmarkFIFOCache_Eviction_NoLock(b *testing.B) {
+	fifo, _ := NewFIFOCache[int, int](100, WithConcurrentSafe(false))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		fifo.Set(i, i)
+	}
+}
+
+// BenchmarkFIFOCache_ConcurrentSetGet 基准测试并发环境下的Set和Get操作性能
+func BenchmarkFIFOCache_ConcurrentSetGet(b *testing.B) {
+	fifo, _ := NewFIFOCache[int, int](1000)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			key := i % 1000
+			fifo.Set(key, i)
+			fifo.Get(key)
+			i++
+		}
+	})
 }

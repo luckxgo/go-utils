@@ -3,7 +3,23 @@ package cache
 import (
 	ctl "container/list"
 	"errors"
+	"sync"
 )
+
+// LFUOption 定义LFU缓存的配置选项函数类型
+type LFUOption func(*lfuCacheOptions)
+
+// lfuCacheOptions LFU缓存的配置选项
+type lfuCacheOptions struct {
+	concurrentSafe bool
+}
+
+// WithLFUConcurrentSafe 设置是否启用并发安全模式
+func WithLFUConcurrentSafe(concurrentSafe bool) LFUOption {
+	return func(o *lfuCacheOptions) {
+		o.concurrentSafe = concurrentSafe
+	}
+}
 
 type lfuNode[K comparable, V any] struct {
 	key   K
@@ -13,10 +29,12 @@ type lfuNode[K comparable, V any] struct {
 }
 
 type LFUCache[K comparable, V any] struct {
-	cache    map[K]*lfuNode[K, V]
-	freqMap  map[int]*ctl.List
-	minFreq  int
-	capacity int
+	cache          map[K]*lfuNode[K, V]
+	freqMap        map[int]*ctl.List
+	minFreq        int
+	capacity       int
+	concurrentSafe bool
+	mu             sync.RWMutex
 }
 
 // NewLFUCache 创建新的LFU缓存实例
@@ -24,19 +42,34 @@ type LFUCache[K comparable, V any] struct {
 // 返回值:
 //   *LFUCache[K, V]: 成功创建的缓存实例
 //   error: 当capacity <= 0时返回非nil错误
-func NewLFUCache[K comparable, V any](capacity int) (*LFUCache[K, V], error) {
+func NewLFUCache[K comparable, V any](capacity int, options ...LFUOption) (*LFUCache[K, V], error) {
 	if capacity <= 0 {
 		return nil, errors.New("capacity must be positive")
 	}
+
+	opts := lfuCacheOptions{
+		concurrentSafe: true, // 默认启用并发安全
+	}
+	for _, opt := range options {
+		opt(&opts)
+	}
+
 	return &LFUCache[K, V]{
-		cache:    make(map[K]*lfuNode[K, V]),
-		freqMap:  make(map[int]*ctl.List),
-		capacity: capacity,
-	}, nil
+		cache:          make(map[K]*lfuNode[K, V]),
+		freqMap:        make(map[int]*ctl.List),
+		capacity:       capacity,
+		concurrentSafe: opts.concurrentSafe,
+	},
+	nil
 }
 
 // Get 实现Cache接口的Get方法
 func (l *LFUCache[K, V]) Get(key K) (value V, exists bool) {
+	if l.concurrentSafe {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+	}
+
 	node, exists := l.cache[key]
 	if !exists {
 		return value, false
@@ -49,6 +82,11 @@ func (l *LFUCache[K, V]) Get(key K) (value V, exists bool) {
 
 // Set 实现Cache接口的Set方法
 func (l *LFUCache[K, V]) Set(key K, value V) {
+	if l.concurrentSafe {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+	}
+
 	if node, exists := l.cache[key]; exists {
 		node.value = value
 		l.updateFreq(node)
@@ -81,6 +119,11 @@ func (l *LFUCache[K, V]) Set(key K, value V) {
 
 // Delete 实现Cache接口的Delete方法
 func (l *LFUCache[K, V]) Delete(key K) {
+	if l.concurrentSafe {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+	}
+
 	node, exists := l.cache[key]
 	if !exists {
 		return
@@ -103,11 +146,21 @@ func (l *LFUCache[K, V]) Delete(key K) {
 
 // Len 实现Cache接口的Len方法
 func (l *LFUCache[K, V]) Len() int {
+	if l.concurrentSafe {
+		l.mu.RLock()
+		defer l.mu.RUnlock()
+	}
+
 	return len(l.cache)
 }
 
 // Clear 实现Cache接口的Clear方法
 func (l *LFUCache[K, V]) Clear() {
+	if l.concurrentSafe {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+	}
+
 	l.cache = make(map[K]*lfuNode[K, V])
 	l.freqMap = make(map[int]*ctl.List)
 	l.minFreq = 0

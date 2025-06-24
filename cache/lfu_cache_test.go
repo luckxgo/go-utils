@@ -33,10 +33,10 @@ func TestLFUCache_Eviction(t *testing.T) {
 		t.Fatalf("创建LFU缓存失败: %v", err)
 	}
 
-	lfu.Set(1, "a")  // freq:1
-	lfu.Set(2, "b")  // freq:1
-	lfu.Get(1)        // freq:2
-	lfu.Set(3, "c")  // 触发淘汰，淘汰频率最低的2
+	lfu.Set(1, "a") // freq:1
+	lfu.Set(2, "b") // freq:1
+	lfu.Get(1)      // freq:2
+	lfu.Set(3, "c") // 触发淘汰，淘汰频率最低的2
 
 	// 验证2被淘汰
 	_, exists := lfu.Get(2)
@@ -63,11 +63,11 @@ func TestLFUCache_FreqOrder(t *testing.T) {
 		t.Fatalf("创建LFU缓存失败: %v", err)
 	}
 
-	lfu.Set(1, "a")  // freq:1
-	lfu.Set(2, "b")  // freq:1
-	lfu.Get(1)        // freq:2
-	lfu.Get(2)        // freq:2
-	lfu.Set(3, "c")  // 触发淘汰，相同频率下淘汰最久未使用的1
+	lfu.Set(1, "a") // freq:1
+	lfu.Set(2, "b") // freq:1
+	lfu.Get(1)      // freq:2
+	lfu.Get(2)      // freq:2
+	lfu.Set(3, "c") // 触发淘汰，相同频率下淘汰最久未使用的1
 
 	_, exists := lfu.Get(1)
 	if exists {
@@ -147,4 +147,17 @@ func BenchmarkLFUCache_Eviction(b *testing.B) {
 			lfu.Get(i % 100)
 		}
 	}
+}
+
+// BenchmarkLFUCacheConcurrent 并发读写性能基准测试
+func BenchmarkLFUCacheConcurrent(b *testing.B) {
+	cache, _ := NewLFUCache[int, int](1000)
+	b.RunParallel(func(pb *testing.PB) {
+		key := 0
+		for pb.Next() {
+			cache.Set(key, key)
+			cache.Get(key)
+			key = (key + 1) % 1000 // 循环使用键以模拟实际场景
+		}
+	})
 }

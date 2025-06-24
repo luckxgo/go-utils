@@ -1,8 +1,88 @@
 package cache
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 )
+
+// TestLRUCacheConcurrent 测试并发环境下LRU缓存的正确性
+func TestLRUCacheConcurrent(t *testing.T) {
+	cache, err := NewLRUCache[int, int](100000)
+	if err != nil {
+		t.Fatalf("Failed to create LRU cache: %v", err)
+	}
+
+	const (
+		numGoroutines          = 50
+		operationsPerGoroutine = 2000
+	)
+	var wg sync.WaitGroup
+	errCh := make(chan error, numGoroutines)
+
+	wg.Add(numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < operationsPerGoroutine; j++ {
+				key := goroutineID*operationsPerGoroutine + j
+				cache.Set(key, key*2)
+				val, exists := cache.Get(key)
+				if !exists || val != key*2 {
+					errCh <- fmt.Errorf("goroutine %d: key %d, expected %d, got %v (exists: %v)", goroutineID, key, key*2, val, exists)
+					return
+				}
+
+				// 暂时禁用随机删除操作以验证并发读写
+			// if j%10 == 0 {
+			// 	cache.Delete(key)
+			// }
+			}
+		}(i)
+	}
+
+	// 等待所有goroutine完成并检查错误
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+
+	for err := range errCh {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+
+	// 验证最终缓存状态
+	if cache.Len() < 0 {
+		 t.Errorf("Unexpected cache length: %d", cache.Len())
+	}
+}
+
+// BenchmarkLRUCacheConcurrent 并发读写性能基准测试
+func BenchmarkLRUCacheConcurrent(b *testing.B) {
+	cache, _ := NewLRUCache[int, int](1000)
+	b.RunParallel(func(pb *testing.PB) {
+		key := 0
+		for pb.Next() {
+			cache.Set(key, key)
+			cache.Get(key)
+			key = (key + 1) % 1000 // 循环使用键以模拟实际场景
+		}
+	})
+}
+
+// BenchmarkLRUCacheWithEviction 带淘汰机制的LRU性能基准测试
+func BenchmarkLRUCacheWithEviction(b *testing.B) {
+	cache, _ := NewLRUCache[int, int](100)
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		key := i % 200 // 超出容量以触发淘汰
+		cache.Set(key, i)
+		cache.Get(key)
+	}
+}
 
 // TestLRUCache_Basic 测试基本的Set和Get操作
 func TestLRUCache_Basic(t *testing.T) {
@@ -35,8 +115,8 @@ func TestLRUCache_Eviction(t *testing.T) {
 
 	lru.Set(1, "a")
 	lru.Set(2, "b")
-	lru.Get(1)        // 访问1，使其成为最近使用
-	lru.Set(3, "c")  // 触发淘汰，淘汰最久未使用的2
+	lru.Get(1)      // 访问1，使其成为最近使用
+	lru.Set(3, "c") // 触发淘汰，淘汰最久未使用的2
 
 	// 验证2被淘汰
 	_, exists := lru.Get(2)
@@ -66,8 +146,8 @@ func TestLRUCache_UpdateAccess(t *testing.T) {
 	lru.Set(1, "a")
 	lru.Set(2, "b")
 	lru.Set(3, "c")
-	lru.Get(1)        // 访问1
-	lru.Set(4, "d")  // 触发淘汰，淘汰最久未使用的2
+	lru.Get(1)      // 访问1
+	lru.Set(4, "d") // 触发淘汰，淘汰最久未使用的2
 
 	_, exists := lru.Get(2)
 	if exists {

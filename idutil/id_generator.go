@@ -6,12 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	mathrand "math/rand"
 	"net"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+)
+
+// 相关变量与初始化
+var (
+	objectIDCounter uint32
+	machineID       [3]byte
+	processID       [2]byte
 )
 
 // GenerateUUID 生成UUID v4 (RFC 4122)
@@ -32,21 +38,6 @@ func UUID() (string, error) {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		uuid[:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:]), nil
 }
-
-// ObjectId相关变量与初始化
-var (
-	objectIDCounter  uint32
-	machineID        [3]byte
-	processID        [2]byte
-	timestampCounter uint32
-	lastTimestampSec int64
-	randPool         = sync.Pool{
-		New: func() interface{} {
-			return mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
-		},
-	}
-	randMutex sync.Mutex
-)
 
 func init() {
 	// 初始化机器ID(优先使用MAC地址)
@@ -178,7 +169,6 @@ func (g *SnowflakeGenerator) NextID() (int64, error) {
 // ULID (Universally Unique Lexicographically Sortable Identifier) 是一种可排序的唯一标识符
 // 格式: 128位 (16字节)，其中48位为时间戳(毫秒级)，80位为随机数
 // 编码后为26个字符的Crockford Base32字符串
-
 type ULIDGenerator struct {
 	mu       sync.Mutex
 	lastTime uint64
